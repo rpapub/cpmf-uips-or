@@ -1,6 +1,7 @@
 """cpmf-uisor: UiPath Object Repository CLI Tool."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
+__schema_version__ = "v0.1.2"  # JSON export schema version
 
 # Core discovery
 from .discovery import (

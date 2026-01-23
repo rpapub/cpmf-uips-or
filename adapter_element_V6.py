@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .models import VariableDecl
 from .parser import read_content_file, verify_xml_wellformed
 
 VERSION = "V6"
@@ -48,6 +49,9 @@ class ElementContent:
     # Parsed attributes from selectors
     scope_attrs: dict[str, str] = field(default_factory=dict)
     selector_attrs: list[dict[str, str]] = field(default_factory=list)
+
+    # Declared variables from ObjectRepositoryVariableData
+    variables: list[VariableDecl] | None = None
 
 
 def _unescape_xml(text: str) -> str:
@@ -187,6 +191,17 @@ def parse_content(path: Path) -> ElementContent | None:
 
         selector_attrs = _parse_selector_attrs(full_selector) if full_selector else []
 
+        # Extract ObjectRepositoryVariableData (Name and DefaultValue)
+        variables: list[VariableDecl] = []
+        for var_match in re.finditer(r'<ObjectRepositoryVariableData\s+([^>]*)/?>', text):
+            attrs = var_match.group(1)
+            name_match = re.search(r'Name="([^"]*)"', attrs)
+            default_match = re.search(r'DefaultValue="([^"]*)"', attrs)
+            if name_match:
+                name = name_match.group(1)
+                default = default_match.group(1) if default_match else "*"
+                variables.append(VariableDecl(name=name, default=default))
+
         return ElementContent(
             version=version,
             search_steps=search_steps,
@@ -204,6 +219,7 @@ def parse_content(path: Path) -> ElementContent | None:
             wait_for_ready=wait_for_ready,
             scope_attrs=scope_attrs,
             selector_attrs=selector_attrs,
+            variables=variables if variables else None,
         )
     except Exception:
         return None

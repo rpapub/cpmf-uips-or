@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .models import VariableDecl
 from .parser import read_content_file, verify_xml_wellformed
 
 VERSION = "V2"
@@ -36,7 +37,7 @@ class ScreenContent:
     version: str
     browser_type: str | None = None
     screenshot: str | None = None  # InformativeScreenshot filename
-    variables: list[str] | None = None  # ObjectRepositoryVariableData names
+    variables: list[VariableDecl] | None = None  # ObjectRepositoryVariableData entries
 
 
 def parse_content(path: Path) -> ScreenContent | None:
@@ -84,10 +85,16 @@ def parse_content(path: Path) -> ScreenContent | None:
         )
         screenshot = screenshot_match.group(1) if screenshot_match else None
 
-        # Extract ObjectRepositoryVariableData names
-        variables: list[str] = []
-        for var_match in re.finditer(r'<ObjectRepositoryVariableData[^>]*Name="([^"]*)"', text):
-            variables.append(var_match.group(1))
+        # Extract ObjectRepositoryVariableData (Name and DefaultValue)
+        variables: list[VariableDecl] = []
+        for var_match in re.finditer(r'<ObjectRepositoryVariableData\s+([^>]*)/?>', text):
+            attrs = var_match.group(1)
+            name_match = re.search(r'Name="([^"]*)"', attrs)
+            default_match = re.search(r'DefaultValue="([^"]*)"', attrs)
+            if name_match:
+                name = name_match.group(1)
+                default = default_match.group(1) if default_match else "*"
+                variables.append(VariableDecl(name=name, default=default))
 
         return ScreenContent(
             url=url,

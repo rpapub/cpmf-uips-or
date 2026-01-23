@@ -8,6 +8,7 @@ from typing import Optional
 
 import typer
 
+from . import __schema_version__
 from . import adapter_element_V6 as element_adapter
 from . import adapter_screen_V2 as screen_adapter
 from .discovery import audit_all, discover_all, find_objects_dir
@@ -170,12 +171,9 @@ def inventory(
 
         screenshots_dir = project.parent / ".screenshots"
 
-        # cpmf-uisor schema version
-        UISOR_SCHEMA_VERSION = "v0.1.0"
-
         # Prepare uisor data
         uisor_data = format_flat_json(inv)
-        uisor_data["schemaVersion"] = UISOR_SCHEMA_VERSION
+        uisor_data["schemaVersion"] = __schema_version__
         if type_filter == TypeFilter.screen:
             uisor_data["entries"] = [e for e in uisor_data["entries"] if e["type"] == "screen"]
         elif type_filter == TypeFilter.element:
@@ -193,7 +191,7 @@ def inventory(
                     "id": "or-main",
                     "path": "data/uisor.json",
                     "contentType": "application/json",
-                    "schemaVersion": UISOR_SCHEMA_VERSION,
+                    "schemaVersion": __schema_version__,
                 }
             ],
         }
@@ -232,7 +230,8 @@ def inventory(
                 typer.echo(f"  URL:      {e.url} ({url_status})")
                 typer.echo(f"  Selector: {_truncate(e.selector, 80)}")
                 if e.declared_variables:
-                    typer.echo(f"  Variables: {', '.join(e.declared_variables)}")
+                    var_strs = [f"{v.name}={v.default}" for v in e.declared_variables]
+                    typer.echo(f"  Variables: {', '.join(var_strs)}")
                 typer.echo()
 
         # Display Elements

@@ -9,8 +9,16 @@ from .models import (
     Inventory,
     ScreenEntry,
     ScreenNode,
+    VariableDecl,
     VersionNode,
 )
+
+
+def _variables_to_dicts(variables: list[VariableDecl] | None) -> list[dict[str, str]] | None:
+    """Convert VariableDecl list to JSON-serializable dicts."""
+    if not variables:
+        return None
+    return [{"name": v.name, "default": v.default} for v in variables]
 
 
 def format_tree_text(inventory: Inventory) -> str:
@@ -112,11 +120,12 @@ def _screen_node_to_dict(screen_node: ScreenNode) -> dict[str, Any]:
     return {
         "name": screen.screen_name,
         "reference": screen.reference,
+        "depth": screen.depth,
         "url": screen.url,
         "url_status": screen.url_status.value,
         "variable": screen.variable_name,
         "selector": screen.selector,
-        "declared_variables": screen.declared_variables,
+        "declared_variables": _variables_to_dicts(screen.declared_variables),
         "version": screen.descriptor_version,
         "created": screen.created,
         "updated": screen.updated,
@@ -132,6 +141,7 @@ def _element_node_to_dict(element_node: ElementNode) -> dict[str, Any]:
     return {
         "name": el.element_name,
         "reference": el.reference,
+        "depth": el.depth,
         "search_steps": el.search_steps,
         "element_type": el.element_type,
         "activity_type": el.activity_type,
@@ -145,6 +155,7 @@ def _element_node_to_dict(element_node: ElementNode) -> dict[str, Any]:
         "cv_type": el.cv_type,
         "scope_variables": el.scope_variables,
         "selector_variables": el.selector_variables,
+        "declared_variables": _variables_to_dicts(el.declared_variables),
         "version": el.descriptor_version,
         "created": el.created,
         "updated": el.updated,
@@ -193,6 +204,10 @@ def _screen_to_flat_dict(screen: ScreenEntry) -> dict[str, Any]:
     return {
         "type": "screen",
         "path": screen.full_path,
+        "depth": screen.depth,
+        "screenshot": screen.screenshot,
+        "screenshot_width": screen.screenshot_width,
+        "screenshot_height": screen.screenshot_height,
         # Explicit filter fields
         "app_name": screen.app_name,
         "app_version": screen.app_version,
@@ -200,7 +215,7 @@ def _screen_to_flat_dict(screen: ScreenEntry) -> dict[str, Any]:
         # Screen attributes
         "url": screen.url,
         "selector": screen.selector,
-        "declared_variables": screen.declared_variables,
+        "declared_variables": _variables_to_dicts(screen.declared_variables),
         "status": screen.url_status.value,
         "variable": screen.variable_name,
         "version": screen.descriptor_version,
@@ -222,6 +237,10 @@ def _element_to_flat_dict(element: ElementEntry) -> dict[str, Any]:
     return {
         "type": "element",
         "path": element.full_path,
+        "depth": element.depth,
+        "screenshot": element.screenshot,
+        "screenshot_width": element.screenshot_width,
+        "screenshot_height": element.screenshot_height,
         # Explicit filter fields
         "app_name": element.app_name,
         "app_version": element.app_version,
@@ -242,6 +261,7 @@ def _element_to_flat_dict(element: ElementEntry) -> dict[str, Any]:
         "cv_type": element.cv_type,
         "scope_variables": element.scope_variables,
         "selector_variables": element.selector_variables,
+        "declared_variables": _variables_to_dicts(element.declared_variables),
         "version": element.descriptor_version,
         # References for hierarchy navigation
         "reference": element.reference,

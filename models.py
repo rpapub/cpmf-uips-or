@@ -13,6 +13,14 @@ class UrlStatus(Enum):
     PARAMETERIZED = "parameterized"
 
 
+@dataclass
+class VariableDecl:
+    """Declared variable from ObjectRepositoryVariableData."""
+
+    name: str
+    default: str = "*"
+
+
 class EntryType(Enum):
     """Object entry type."""
 
@@ -63,7 +71,10 @@ class ScreenEntry:
     content_path: Path
     parent_ref: str | None = None  # Reference to parent AppVersion
     screenshot: str | None = None  # InformativeScreenshot filename
-    declared_variables: list[str] | None = None  # ObjectRepositoryVariableData names
+    screenshot_width: int | None = None  # Screenshot width in pixels
+    screenshot_height: int | None = None  # Screenshot height in pixels
+    declared_variables: list[VariableDecl] | None = None  # ObjectRepositoryVariableData entries
+    depth: int = 2  # Hierarchy depth: App(0) > Version(1) > Screen(2)
 
     # Audit metadata from .metadata file
     created: str | None = None
@@ -102,6 +113,8 @@ class ElementEntry:
     content_path: Path
     parent_ref: str | None = None  # Reference to parent Screen or Element
     screenshot: str | None = None  # InformativeScreenshot filename
+    screenshot_width: int | None = None  # Screenshot width in pixels
+    screenshot_height: int | None = None  # Screenshot height in pixels
 
     # Additional selector types
     fuzzy_selector: str = ""  # FuzzySelectorArgument
@@ -116,6 +129,10 @@ class ElementEntry:
     # Parameterization status for scope and selector
     scope_variables: list[str] = field(default_factory=list)
     selector_variables: list[str] = field(default_factory=list)
+
+    # Declared variables from ObjectRepositoryVariableData
+    declared_variables: list[VariableDecl] | None = None
+    depth: int = 3  # Hierarchy depth: App(0) > Version(1) > Screen(2) > Element(3+)
 
     # Audit metadata from .metadata file
     created: str | None = None

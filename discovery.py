@@ -26,6 +26,28 @@ from .models import (
 )
 from .parser import Metadata, parse_metadata
 
+# Optional PIL import for image dimensions
+try:
+    from PIL import Image
+
+    _PIL_AVAILABLE = True
+except ImportError:
+    _PIL_AVAILABLE = False
+
+
+def _get_image_size(image_path: Path) -> tuple[int, int] | None:
+    """Get image dimensions (width, height) in pixels.
+
+    Returns None if PIL is not available or image cannot be read.
+    """
+    if not _PIL_AVAILABLE or not image_path.exists():
+        return None
+    try:
+        with Image.open(image_path) as img:
+            return img.size  # (width, height)
+    except Exception:
+        return None
+
 
 def find_objects_dir(project_json: Path) -> Path:
     """Get .objects directory from project.json path."""
@@ -55,7 +77,12 @@ def discover_all(objects_dir: Path) -> tuple[list[ScreenEntry], list[ElementEntr
     if not objects_dir.exists():
         return screens, elements
 
-    _traverse(objects_dir, screens, elements, app_name=None, app_version=None, screen_name=None)
+    screenshots_dir = objects_dir.parent / ".screenshots"
+    _traverse(
+        objects_dir, screens, elements,
+        app_name=None, app_version=None, screen_name=None,
+        screenshots_dir=screenshots_dir if screenshots_dir.exists() else None,
+    )
 
     return screens, elements
 
@@ -74,6 +101,7 @@ def _traverse(
     app_name: str | None,
     app_version: str | None,
     screen_name: str | None,
+    screenshots_dir: Path | None = None,
 ) -> None:
     """Recursively traverse the object repository."""
     node_type = read_type(folder)
@@ -99,6 +127,14 @@ def _traverse(
                 var_name, _ = screen_adapter.extract_variable(content_data.url)
                 url_status = UrlStatus.PARAMETERIZED if var_name else UrlStatus.HARDCODED
 
+                # Get screenshot dimensions if available
+                screenshot_width = None
+                screenshot_height = None
+                if content_data.screenshot and screenshots_dir:
+                    img_size = _get_image_size(screenshots_dir / content_data.screenshot)
+                    if img_size:
+                        screenshot_width, screenshot_height = img_size
+
                 screens.append(
                     ScreenEntry(
                         app_name=app_name or "Unknown",
@@ -113,6 +149,8 @@ def _traverse(
                         content_path=content_path,
                         parent_ref=meta.parent_ref if meta else None,
                         screenshot=content_data.screenshot,
+                        screenshot_width=screenshot_width,
+                        screenshot_height=screenshot_height,
                         declared_variables=content_data.variables,
                         created=meta.created if meta else None,
                         updated=meta.updated if meta else None,
@@ -134,6 +172,14 @@ def _traverse(
                 scope_vars = element_adapter.extract_variables(content_data.scope_selector)
                 selector_vars = element_adapter.extract_variables(content_data.full_selector)
 
+                # Get screenshot dimensions if available
+                screenshot_width = None
+                screenshot_height = None
+                if content_data.screenshot and screenshots_dir:
+                    img_size = _get_image_size(screenshots_dir / content_data.screenshot)
+                    if img_size:
+                        screenshot_width, screenshot_height = img_size
+
                 elements.append(
                     ElementEntry(
                         app_name=app_name or "Unknown",
@@ -151,6 +197,8 @@ def _traverse(
                         content_path=content_path,
                         parent_ref=meta.parent_ref if meta else None,
                         screenshot=content_data.screenshot,
+                        screenshot_width=screenshot_width,
+                        screenshot_height=screenshot_height,
                         fuzzy_selector=content_data.fuzzy_selector,
                         has_image=content_data.has_image,
                         has_cv=content_data.has_cv,
@@ -159,6 +207,7 @@ def _traverse(
                         wait_for_ready=content_data.wait_for_ready,
                         scope_variables=scope_vars,
                         selector_variables=selector_vars,
+                        declared_variables=content_data.variables,
                         created=meta.created if meta else None,
                         updated=meta.updated if meta else None,
                         created_by=meta.created_by if meta else None,
@@ -169,7 +218,7 @@ def _traverse(
     # Continue traversing child folders (for all types)
     for child in folder.iterdir():
         if child.is_dir() and not child.name.startswith("."):
-            _traverse(child, screens, elements, app_name, app_version, screen_name)
+            _traverse(child, screens, elements, app_name, app_version, screen_name, screenshots_dir)
 
 
 def _find_root_screen(
@@ -418,6 +467,34 @@ def build_hierarchy(
     return list(apps_by_ref.values())
 
 
+def _calculate_element_depth(
+    element: ElementEntry,
+    elements_by_ref: dict[str, ElementEntry],
+    screens_by_ref: dict[str, ScreenEntry],
+) -> int:
+    """Calculate element depth by traversing parent_ref chain.
+
+    Depth: App(0) > Version(1) > Screen(2) > Element(3+)
+    Nested elements have depth = 3 + nesting level.
+    """
+    depth = 3  # Base depth for elements under a screen
+    parent_ref = element.parent_ref
+
+    while parent_ref:
+        if parent_ref in screens_by_ref:
+            # Reached screen parent - done
+            break
+        if parent_ref in elements_by_ref:
+            # Parent is another element - increment depth
+            depth += 1
+            parent_ref = elements_by_ref[parent_ref].parent_ref
+        else:
+            # Unknown parent - stop
+            break
+
+    return depth
+
+
 def discover_inventory(objects_dir: Path) -> Inventory:
     """Discover all objects and build hierarchical inventory.
 
@@ -446,7 +523,20 @@ def discover_inventory(objects_dir: Path) -> Inventory:
             )
 
     # Collect flat lists
-    _traverse(objects_dir, screens, elements, app_name=None, app_version=None, screen_name=None)
+    screenshots_dir = objects_dir.parent / ".screenshots"
+    _traverse(
+        objects_dir, screens, elements,
+        app_name=None, app_version=None, screen_name=None,
+        screenshots_dir=screenshots_dir if screenshots_dir.exists() else None,
+    )
+
+    # Build reference lookups for depth calculation
+    screens_by_ref = {s.reference: s for s in screens}
+    elements_by_ref = {e.reference: e for e in elements}
+
+    # Calculate depths for elements (screens are always depth 2)
+    for element in elements:
+        element.depth = _calculate_element_depth(element, elements_by_ref, screens_by_ref)
 
     # Collect hierarchy metadata
     apps_meta, versions_meta = _collect_hierarchy_metadata(objects_dir)
