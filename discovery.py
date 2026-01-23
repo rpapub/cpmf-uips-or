@@ -18,12 +18,13 @@ from .models import (
     ElementEntry,
     ElementNode,
     Inventory,
+    LibraryMeta,
     ScreenEntry,
     ScreenNode,
     UrlStatus,
     VersionNode,
 )
-from .parser import parse_metadata
+from .parser import Metadata, parse_metadata
 
 
 def find_objects_dir(project_json: Path) -> Path:
@@ -112,6 +113,11 @@ def _traverse(
                         content_path=content_path,
                         parent_ref=meta.parent_ref if meta else None,
                         screenshot=content_data.screenshot,
+                        declared_variables=content_data.variables,
+                        created=meta.created if meta else None,
+                        updated=meta.updated if meta else None,
+                        created_by=meta.created_by if meta else None,
+                        updated_by=meta.updated_by if meta else None,
                     )
                 )
 
@@ -145,8 +151,18 @@ def _traverse(
                         content_path=content_path,
                         parent_ref=meta.parent_ref if meta else None,
                         screenshot=content_data.screenshot,
+                        fuzzy_selector=content_data.fuzzy_selector,
+                        has_image=content_data.has_image,
+                        has_cv=content_data.has_cv,
+                        cv_type=content_data.cv_type,
+                        visibility=content_data.visibility,
+                        wait_for_ready=content_data.wait_for_ready,
                         scope_variables=scope_vars,
                         selector_variables=selector_vars,
+                        created=meta.created if meta else None,
+                        updated=meta.updated if meta else None,
+                        created_by=meta.created_by if meta else None,
+                        updated_by=meta.updated_by if meta else None,
                     )
                 )
 
@@ -154,6 +170,66 @@ def _traverse(
     for child in folder.iterdir():
         if child.is_dir() and not child.name.startswith("."):
             _traverse(child, screens, elements, app_name, app_version, screen_name)
+
+
+def _find_root_screen(
+    element: ElementEntry,
+    screens_by_ref: dict[str, ScreenEntry],
+    elements_by_ref: dict[str, ElementEntry],
+) -> ScreenEntry | None:
+    """Traverse parent_ref chain to find the ancestor screen.
+
+    Handles nested elements by following the chain:
+    NestedElement -> ParentElement -> ... -> Screen
+    """
+    parent_ref = element.parent_ref
+    while parent_ref:
+        if parent_ref in screens_by_ref:
+            return screens_by_ref[parent_ref]
+        if parent_ref in elements_by_ref:
+            parent_ref = elements_by_ref[parent_ref].parent_ref
+        else:
+            break
+    return None
+
+
+def _is_selector_parameterized(selector: str) -> bool:
+    """Check if a selector contains parameterized values [varName]."""
+    import re
+    # Look for [varName] pattern (not string.Format, just simple variable)
+    return bool(re.search(r"\[(?!string\.Format)[a-zA-Z_][a-zA-Z0-9_]*\]", selector))
+
+
+def _check_scope_consistency(
+    screens: list[ScreenEntry],
+    elements: list[ElementEntry],
+) -> list[str]:
+    """Find elements with hardcoded scope whose ancestor screen has parameterized selector.
+
+    Returns:
+        List of issue strings describing inconsistencies
+    """
+    issues: list[str] = []
+    screens_by_ref = {s.reference: s for s in screens}
+    elements_by_ref = {e.reference: e for e in elements}
+
+    for elem in elements:
+        # Find ancestor screen (handles nested elements)
+        root_screen = _find_root_screen(elem, screens_by_ref, elements_by_ref)
+        if not root_screen:
+            continue
+
+        # Check: ancestor has parameterized selector but element has hardcoded scope
+        screen_selector_parameterized = _is_selector_parameterized(root_screen.selector)
+        element_scope_parameterized = bool(elem.scope_variables)
+
+        if screen_selector_parameterized and not element_scope_parameterized:
+            issues.append(
+                f"Inconsistent scope: {elem.full_path} has hardcoded scope but "
+                f"ancestor Screen '{root_screen.screen_name}' has parameterized selector"
+            )
+
+    return issues
 
 
 def audit_all(
@@ -212,6 +288,10 @@ def audit_all(
                 f"Unsupported Element version {entry.descriptor_version}: {entry.full_path}"
             )
 
+    # Check scope consistency (parameterized screen selector with hardcoded element scope)
+    consistency_issues = _check_scope_consistency(screens, elements)
+    result.issues.extend(consistency_issues)
+
     return result
 
 
@@ -234,16 +314,14 @@ def _extract_id(reference: str | None) -> str | None:
 
 def _collect_hierarchy_metadata(
     objects_dir: Path,
-) -> tuple[list[tuple[str, str]], list[tuple[str, str, str | None]]]:
-    """Collect App and AppVersion (name, reference, parent_ref) tuples.
+) -> tuple[list[Metadata], list[Metadata]]:
+    """Collect App and AppVersion metadata.
 
     Returns:
-        Tuple of (apps_meta, versions_meta) where:
-        - apps_meta: list of (name, reference)
-        - versions_meta: list of (name, reference, parent_ref)
+        Tuple of (apps_meta, versions_meta) where both are lists of Metadata objects
     """
-    apps_meta: list[tuple[str, str]] = []
-    versions_meta: list[tuple[str, str, str | None]] = []
+    apps_meta: list[Metadata] = []
+    versions_meta: list[Metadata] = []
 
     def _collect(folder: Path) -> None:
         node_type = read_type(folder)
@@ -251,12 +329,12 @@ def _collect_hierarchy_metadata(
         if node_type == "App":
             meta = parse_metadata(folder / ".metadata")
             if meta:
-                apps_meta.append((meta.name, meta.reference))
+                apps_meta.append(meta)
 
         elif node_type == "AppVersion":
             meta = parse_metadata(folder / ".metadata")
             if meta:
-                versions_meta.append((meta.name, meta.reference, meta.parent_ref))
+                versions_meta.append(meta)
 
         # Continue traversing for nested nodes
         for child in folder.iterdir():
@@ -272,8 +350,8 @@ def _collect_hierarchy_metadata(
 def build_hierarchy(
     screens: list[ScreenEntry],
     elements: list[ElementEntry],
-    apps_meta: list[tuple[str, str]],
-    versions_meta: list[tuple[str, str, str | None]],
+    apps_meta: list[Metadata],
+    versions_meta: list[Metadata],
 ) -> list[AppNode]:
     """Build tree from flat lists using parent_ref links.
 
@@ -284,14 +362,23 @@ def build_hierarchy(
     """
     # Build apps lookup: reference -> AppNode
     apps_by_ref: dict[str, AppNode] = {}
-    for name, reference in apps_meta:
-        apps_by_ref[reference] = AppNode(name=name, reference=reference)
+    for meta in apps_meta:
+        apps_by_ref[meta.reference] = AppNode(
+            name=meta.name,
+            reference=meta.reference,
+            created=meta.created,
+            created_by=meta.created_by,
+        )
 
     # Build versions lookup: reference -> VersionNode
     versions_by_ref: dict[str, VersionNode] = {}
-    for name, reference, parent_ref in versions_meta:
-        versions_by_ref[reference] = VersionNode(
-            name=name, reference=reference, parent_ref=parent_ref
+    for meta in versions_meta:
+        versions_by_ref[meta.reference] = VersionNode(
+            name=meta.name,
+            reference=meta.reference,
+            parent_ref=meta.parent_ref,
+            created=meta.created,
+            created_by=meta.created_by,
         )
 
     # Group versions under apps
@@ -346,6 +433,18 @@ def discover_inventory(objects_dir: Path) -> Inventory:
     if not objects_dir.exists():
         return Inventory(screens=[], elements=[], apps=[])
 
+    # Parse library-level metadata
+    library_meta = None
+    lib_metadata_path = objects_dir / ".metadata"
+    if lib_metadata_path.exists():
+        lib_meta = parse_metadata(lib_metadata_path)
+        if lib_meta and lib_meta.created_by:
+            library_meta = LibraryMeta(
+                id=lib_meta.id,
+                created=lib_meta.created or "",
+                created_by=lib_meta.created_by,
+            )
+
     # Collect flat lists
     _traverse(objects_dir, screens, elements, app_name=None, app_version=None, screen_name=None)
 
@@ -367,4 +466,5 @@ def discover_inventory(objects_dir: Path) -> Inventory:
         elements=elements,
         apps=apps,
         _by_reference=by_reference,
+        library=library_meta,
     )

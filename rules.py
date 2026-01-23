@@ -8,8 +8,13 @@ Rule targeting:
 - target = "screen": V2 Screen URLs only
 - target = "element.scope": V6 ScopeSelectorArgument only
 - target = "element.selector": V6 FullSelectorArgument only
+
+Cascade:
+- cascade = true on screen.selector rules cascades to descendant element.scope
+- Uses parent_ref chain to find all elements under a screen (including nested)
 """
 
+import html
 import tomllib
 from fnmatch import fnmatch
 from pathlib import Path
@@ -37,12 +42,97 @@ def _parse_target(target_str: str | None) -> RuleTarget:
         return RuleTarget.ALL
     elif target_str == "screen":
         return RuleTarget.SCREEN
+    elif target_str == "screen.selector":
+        return RuleTarget.SCREEN_SELECTOR
     elif target_str == "element.scope":
         return RuleTarget.ELEMENT_SCOPE
     elif target_str == "element.selector":
         return RuleTarget.ELEMENT_SELECTOR
     else:
         raise ValueError(f"Unknown target: {target_str}")
+
+
+# ============================================================================
+# Cascade helper functions
+# ============================================================================
+
+
+def find_root_screen(
+    element: ElementEntry,
+    screens_by_ref: dict[str, ScreenEntry],
+    elements_by_ref: dict[str, ElementEntry],
+) -> ScreenEntry | None:
+    """Traverse parent_ref chain to find the ancestor screen.
+
+    Handles nested elements by following the chain:
+    NestedElement -> ParentElement -> ... -> Screen
+
+    Args:
+        element: The element to find the root screen for
+        screens_by_ref: Lookup of screens by reference
+        elements_by_ref: Lookup of elements by reference
+
+    Returns:
+        The ancestor ScreenEntry, or None if not found
+    """
+    parent_ref = element.parent_ref
+    while parent_ref:
+        if parent_ref in screens_by_ref:
+            return screens_by_ref[parent_ref]
+        if parent_ref in elements_by_ref:
+            parent_ref = elements_by_ref[parent_ref].parent_ref
+        else:
+            break
+    return None
+
+
+def find_descendant_elements(
+    screen: ScreenEntry,
+    elements: list[ElementEntry],
+    elements_by_ref: dict[str, ElementEntry],
+) -> list[ElementEntry]:
+    """Find all elements that are descendants of a screen (including nested).
+
+    Args:
+        screen: The screen to find descendants for
+        elements: All elements to search
+        elements_by_ref: Lookup of elements by reference
+
+    Returns:
+        List of all descendant elements
+    """
+    screens_by_ref = {screen.reference: screen}
+    descendants = []
+    for elem in elements:
+        root = find_root_screen(elem, screens_by_ref, elements_by_ref)
+        if root and root.reference == screen.reference:
+            descendants.append(elem)
+    return descendants
+
+
+def _extract_selector_attr_value(selector: str, attr_name: str) -> str | None:
+    """Extract an attribute value from a selector XML string.
+
+    Args:
+        selector: The selector XML string (may be escaped)
+        attr_name: The attribute name to extract (e.g., "title")
+
+    Returns:
+        The attribute value, or None if not found
+    """
+    # Unescape the selector
+    unescaped = html.unescape(selector)
+
+    # Simple regex-free extraction: find attr='value' or attr="value"
+    for quote in ["'", '"']:
+        pattern = f"{attr_name}={quote}"
+        start = unescaped.find(pattern)
+        if start != -1:
+            start += len(pattern)
+            end = unescaped.find(quote, start)
+            if end != -1:
+                return unescaped[start:end]
+    return None
 
 
 def load_rules(config_path: Path) -> list[ReplaceRule]:
@@ -75,6 +165,8 @@ def load_rules(config_path: Path) -> list[ReplaceRule]:
             match = rule_data.get("match", "")
             variable = rule_data.get("variable", "")
             attribute = rule_data.get("attribute")  # For element rules
+            default_value = rule_data.get("default_value", "*")  # For ObjectRepositoryVariableData
+            cascade = rule_data.get("cascade", False)  # Cascade screen.selector to element.scope
             if not match or not variable:
                 raise ValueError("parameterize rule requires 'match' and 'variable'")
             rules.append(
@@ -83,6 +175,8 @@ def load_rules(config_path: Path) -> list[ReplaceRule]:
                     match=match,
                     variable=variable,
                     attribute=attribute,
+                    default_value=default_value,
+                    cascade=cascade,
                 )
             )
 
@@ -147,7 +241,7 @@ def _target_matches_entry(target: RuleTarget, entry: AnyEntry, is_scope: bool = 
 
 
 def _match_screen_rule(entry: ScreenEntry, rule: ReplaceRule) -> bool:
-    """Check if a rule applies to a Screen entry.
+    """Check if a rule applies to a Screen entry (URL).
 
     Args:
         entry: Screen entry to check
@@ -181,6 +275,74 @@ def _match_screen_rule(entry: ScreenEntry, rule: ReplaceRule) -> bool:
     return False
 
 
+def _match_screen_selector_rule(
+    entry: ScreenEntry, rule: ReplaceRule
+) -> tuple[bool, str | None, str | None]:
+    """Check if a rule applies to a Screen entry's Selector attribute.
+
+    Args:
+        entry: Screen entry to check
+        rule: Rule to match against
+
+    Returns:
+        Tuple of (matches, attribute, matched_value)
+    """
+    # Only process screen.selector target rules
+    if rule.target != RuleTarget.SCREEN_SELECTOR:
+        return False, None, None
+
+    if not entry.selector:
+        return False, None, None
+
+    if isinstance(rule, ParameterizeRule):
+        # Must have attribute specified for screen.selector rules
+        if not rule.attribute:
+            return False, None, None
+
+        # Check specific attribute within selector
+        import re
+
+        # Try single quotes first (most common in selectors)
+        match = re.search(f"{rule.attribute}='([^']*)'", entry.selector)
+        if not match:
+            # Try double quotes
+            match = re.search(f'{rule.attribute}="([^"]*)"', entry.selector)
+
+        if match:
+            value = match.group(1)
+            # Check if this value contains a variable already
+            if not screen_adapter.is_parameterized(value):
+                if fnmatch(value, rule.match):
+                    return True, rule.attribute, value
+
+    return False, None, None
+
+
+def _is_selector_parameterized(selector: str) -> bool:
+    """Check if a selector is already wrapped in a parameterized expression.
+
+    Detects selectors that are already wrapped in [string.Format(...)] or similar
+    VB.NET expressions, making the idempotency check more robust.
+
+    Args:
+        selector: The selector string to check
+
+    Returns:
+        True if selector is already parameterized at the expression level
+    """
+    stripped = selector.strip()
+    # Check for [expression] wrapper (VB.NET expression syntax)
+    if stripped.startswith("[") and stripped.endswith("]"):
+        # Check for common parameterization patterns
+        inner = stripped[1:-1].strip()
+        if inner.startswith("string.Format(") or inner.startswith("String.Format("):
+            return True
+        # Also check for simple variable reference
+        if not inner.startswith("<"):
+            return True
+    return False
+
+
 def _match_element_rule(
     entry: ElementEntry, rule: ReplaceRule, selector_type: str
 ) -> tuple[bool, str | None, str | None]:
@@ -205,6 +367,10 @@ def _match_element_rule(
     else:
         selector = entry.full_selector
         variables = entry.selector_variables
+
+    # Skip if selector is already parameterized at expression level
+    if _is_selector_parameterized(selector):
+        return False, None, None
 
     if isinstance(rule, ParameterizeRule):
         # Only match if not already parameterized for this attribute
@@ -278,14 +444,14 @@ def _compute_screen_new_value(entry: ScreenEntry, rule: ReplaceRule) -> str:
 
 
 def _compute_element_new_value(old_value: str, rule: ReplaceRule) -> str:
-    """Compute new value after applying rule to Element.
+    """Compute new value after applying rule to Element (simple attribute value).
 
     Args:
         old_value: Current attribute value
         rule: Rule to apply
 
     Returns:
-        New value string
+        New value string (just the attribute value, not full selector)
     """
     if isinstance(rule, ParameterizeRule):
         variable_syntax = element_adapter.format_variable(rule.variable)
@@ -311,6 +477,38 @@ def _compute_element_new_value(old_value: str, rule: ReplaceRule) -> str:
     return old_value
 
 
+def _compute_element_selector_preview(
+    selector: str,
+    attr: str,
+    old_attr_value: str,
+    rule: ReplaceRule,
+) -> tuple[str, str]:
+    """Compute full selector preview for Element parameterization.
+
+    Args:
+        selector: Full selector string (e.g., "<html app='chrome.exe' title='Google' />")
+        attr: Attribute name being changed (e.g., "title")
+        old_attr_value: Current attribute value (e.g., "Google")
+        rule: Rule to apply
+
+    Returns:
+        Tuple of (old_selector, new_selector) for preview display
+    """
+    if isinstance(rule, ParameterizeRule):
+        # Use string.Format wrapper for full selector
+        new_selector = element_adapter.format_selector_with_variable(
+            selector, attr, old_attr_value, rule.variable
+        )
+        return selector, new_selector
+
+    # For other rules, just do simple substitution
+    new_attr_value = _compute_element_new_value(old_attr_value, rule)
+    new_selector = selector.replace(
+        f"{attr}='{old_attr_value}'", f"{attr}='{new_attr_value}'"
+    )
+    return selector, new_selector
+
+
 def preview_replacements(
     screens: list[ScreenEntry],
     elements: list[ElementEntry],
@@ -331,6 +529,13 @@ def preview_replacements(
     previews: list[ReplacePreview] = []
     warnings: list[str] = []
 
+    # Build lookup dicts for cascade support
+    screens_by_ref = {s.reference: s for s in screens}
+    elements_by_ref = {e.reference: e for e in elements}
+
+    # Track elements that have been cascaded to (to avoid duplicate matches)
+    cascaded_elements: set[str] = set()
+
     # Process Screens
     for entry in screens:
         # Check version support
@@ -341,7 +546,12 @@ def preview_replacements(
                 )
                 continue
 
+        matched = False
         for rule in rules:
+            if matched:
+                break
+
+            # Check screen URL rules (target = "screen" or "all")
             if _match_screen_rule(entry, rule):
                 new_value = _compute_screen_new_value(entry, rule)
                 previews.append(
@@ -353,10 +563,72 @@ def preview_replacements(
                         attribute=None,
                     )
                 )
-                break  # Only apply first matching rule
+                matched = True
+                continue
+
+            # Check screen.selector rules
+            matches, attr, old_value = _match_screen_selector_rule(entry, rule)
+            if matches and old_value:
+                new_value = _compute_element_new_value(old_value, rule)
+                previews.append(
+                    ReplacePreview(
+                        entry=entry,
+                        old_value=old_value,
+                        new_value=new_value,
+                        rule=rule,
+                        attribute=attr,
+                    )
+                )
+                matched = True
+
+                # Cascade to descendant elements if enabled
+                if (
+                    isinstance(rule, ParameterizeRule)
+                    and rule.cascade
+                    and attr  # Must have matched an attribute
+                ):
+                    descendants = find_descendant_elements(
+                        entry, elements, elements_by_ref
+                    )
+                    for elem in descendants:
+                        # Skip if already cascaded or not supported
+                        if elem.reference in cascaded_elements:
+                            continue
+                        if not element_adapter.is_version_supported(
+                            elem.descriptor_version
+                        ):
+                            if not force:
+                                continue
+
+                        # Check if element's scope has the same attribute value
+                        elem_attr_value = _extract_selector_attr_value(
+                            elem.scope_selector, attr
+                        )
+                        if elem_attr_value == old_value:
+                            # Element scope matches - include in cascade
+                            old_selector, new_selector = (
+                                _compute_element_selector_preview(
+                                    elem.scope_selector, attr, elem_attr_value, rule
+                                )
+                            )
+                            previews.append(
+                                ReplacePreview(
+                                    entry=elem,
+                                    old_value=old_selector,
+                                    new_value=new_selector,
+                                    rule=rule,
+                                    attribute=attr or "scope",
+                                    attr_value=elem_attr_value,
+                                )
+                            )
+                            cascaded_elements.add(elem.reference)
 
     # Process Elements
     for entry in elements:
+        # Skip if already handled by cascade
+        if entry.reference in cascaded_elements:
+            continue
+
         # Check version support
         if not element_adapter.is_version_supported(entry.descriptor_version):
             if not force:
@@ -371,32 +643,38 @@ def preview_replacements(
                 break
 
             # Check scope selector
-            matches, attr, old_value = _match_element_rule(entry, rule, "scope")
-            if matches and old_value:
-                new_value = _compute_element_new_value(old_value, rule)
+            matches, attr, old_attr_value = _match_element_rule(entry, rule, "scope")
+            if matches and old_attr_value:
+                old_selector, new_selector = _compute_element_selector_preview(
+                    entry.scope_selector, attr, old_attr_value, rule
+                )
                 previews.append(
                     ReplacePreview(
                         entry=entry,
-                        old_value=old_value,
-                        new_value=new_value,
+                        old_value=old_selector,
+                        new_value=new_selector,
                         rule=rule,
                         attribute=attr or "scope",
+                        attr_value=old_attr_value,
                     )
                 )
                 matched = True
                 continue
 
             # Check full selector
-            matches, attr, old_value = _match_element_rule(entry, rule, "selector")
-            if matches and old_value:
-                new_value = _compute_element_new_value(old_value, rule)
+            matches, attr, old_attr_value = _match_element_rule(entry, rule, "selector")
+            if matches and old_attr_value:
+                old_selector, new_selector = _compute_element_selector_preview(
+                    entry.full_selector, attr, old_attr_value, rule
+                )
                 previews.append(
                     ReplacePreview(
                         entry=entry,
-                        old_value=old_value,
-                        new_value=new_value,
+                        old_value=old_selector,
+                        new_value=new_selector,
                         rule=rule,
                         attribute=attr or "selector",
+                        attr_value=old_attr_value,
                     )
                 )
                 matched = True

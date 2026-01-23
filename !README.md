@@ -97,7 +97,7 @@ cpmf-uisor replace path/to/project.json --config rules.toml --force
 
 ## Rules Configuration (TOML)
 
-Three rule types modify `.content` files:
+Three rule types modify `.content` files. Rules are evaluated in order; **first matching rule wins**.
 
 | Type | Purpose | Required Fields |
 |------|---------|-----------------|
@@ -148,10 +148,17 @@ value = "https://test.example.com/"
 
 ## Variable Syntax
 
-Both V2 Screens and V6 Elements use `[variableName]` syntax:
+Both V2 Screens and V6 Elements use `[expression]` syntax. The expression can be:
 
+- Simple variable: `[baseUrl]`
+- Config lookup: `[Config("CmsBaseUrl").ToString()]`
+- Any VB.NET expression UiPath accepts
+
+Examples:
 - **V2 Screen URL**: `[baseUrl]pages/login.xhtml`
 - **V6 Selector attribute**: `<html title='[windowTitle]' />`
+
+XML special characters (`"`, `<`, `>`, `&`, `'`) in variable expressions are automatically escaped when writing to `.content` files.
 
 ## Supported Versions
 

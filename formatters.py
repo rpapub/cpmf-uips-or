@@ -58,10 +58,30 @@ def _format_elements_text(
 
 
 def format_tree_json(inventory: Inventory) -> dict[str, Any]:
-    """Format as nested JSON structure."""
-    return {
-        "apps": [_app_to_dict(app) for app in inventory.apps],
-    }
+    """Format as nested JSON structure with project and library metadata."""
+    result: dict[str, Any] = {}
+
+    # Add project metadata if available
+    if inventory.project:
+        result["project"] = {
+            "name": inventory.project.name,
+            "project_id": inventory.project.project_id,
+            "version": inventory.project.version,
+            "studio_version": inventory.project.studio_version,
+            "target_framework": inventory.project.target_framework,
+            "ui_automation_version": inventory.project.ui_automation_version,
+        }
+
+    # Add library metadata if available
+    if inventory.library:
+        result["library"] = {
+            "id": inventory.library.id,
+            "created": inventory.library.created,
+            "created_by": inventory.library.created_by,
+        }
+
+    result["apps"] = [_app_to_dict(app) for app in inventory.apps]
+    return result
 
 
 def _app_to_dict(app: AppNode) -> dict[str, Any]:
@@ -69,6 +89,8 @@ def _app_to_dict(app: AppNode) -> dict[str, Any]:
     return {
         "name": app.name,
         "reference": app.reference,
+        "created": app.created,
+        "created_by": app.created_by,
         "versions": [_version_to_dict(v) for v in app.versions],
     }
 
@@ -78,6 +100,8 @@ def _version_to_dict(version: VersionNode) -> dict[str, Any]:
     return {
         "name": version.name,
         "reference": version.reference,
+        "created": version.created,
+        "created_by": version.created_by,
         "screens": [_screen_node_to_dict(s) for s in version.screens],
     }
 
@@ -91,7 +115,13 @@ def _screen_node_to_dict(screen_node: ScreenNode) -> dict[str, Any]:
         "url": screen.url,
         "url_status": screen.url_status.value,
         "variable": screen.variable_name,
+        "selector": screen.selector,
+        "declared_variables": screen.declared_variables,
         "version": screen.descriptor_version,
+        "created": screen.created,
+        "updated": screen.updated,
+        "created_by": screen.created_by,
+        "updated_by": screen.updated_by,
         "elements": [_element_node_to_dict(e) for e in screen_node.elements],
     }
 
@@ -105,26 +135,57 @@ def _element_node_to_dict(element_node: ElementNode) -> dict[str, Any]:
         "search_steps": el.search_steps,
         "element_type": el.element_type,
         "activity_type": el.activity_type,
+        "visibility": el.visibility,
+        "wait_for_ready": el.wait_for_ready,
         "scope_selector": el.scope_selector,
         "full_selector": el.full_selector,
+        "fuzzy_selector": el.fuzzy_selector,
+        "has_image": el.has_image,
+        "has_cv": el.has_cv,
+        "cv_type": el.cv_type,
         "scope_variables": el.scope_variables,
         "selector_variables": el.selector_variables,
         "version": el.descriptor_version,
+        "created": el.created,
+        "updated": el.updated,
+        "created_by": el.created_by,
+        "updated_by": el.updated_by,
         "children": [_element_node_to_dict(c) for c in element_node.children],
     }
 
 
-def format_flat_json(inventory: Inventory) -> list[dict[str, Any]]:
-    """Format as flat JSON list (backward compatible)."""
-    data: list[dict[str, Any]] = []
+def format_flat_json(inventory: Inventory) -> dict[str, Any]:
+    """Format as flat JSON with project/library metadata and entries list."""
+    result: dict[str, Any] = {}
 
+    # Add project metadata if available
+    if inventory.project:
+        result["project"] = {
+            "name": inventory.project.name,
+            "project_id": inventory.project.project_id,
+            "version": inventory.project.version,
+            "studio_version": inventory.project.studio_version,
+            "target_framework": inventory.project.target_framework,
+            "ui_automation_version": inventory.project.ui_automation_version,
+        }
+
+    # Add library metadata if available
+    if inventory.library:
+        result["library"] = {
+            "id": inventory.library.id,
+            "created": inventory.library.created,
+            "created_by": inventory.library.created_by,
+        }
+
+    # Add entries list
+    entries: list[dict[str, Any]] = []
     for screen in inventory.screens:
-        data.append(_screen_to_flat_dict(screen))
-
+        entries.append(_screen_to_flat_dict(screen))
     for element in inventory.elements:
-        data.append(_element_to_flat_dict(element))
+        entries.append(_element_to_flat_dict(element))
 
-    return data
+    result["entries"] = entries
+    return result
 
 
 def _screen_to_flat_dict(screen: ScreenEntry) -> dict[str, Any]:
@@ -132,28 +193,63 @@ def _screen_to_flat_dict(screen: ScreenEntry) -> dict[str, Any]:
     return {
         "type": "screen",
         "path": screen.full_path,
+        # Explicit filter fields
+        "app_name": screen.app_name,
+        "app_version": screen.app_version,
+        "screen_name": screen.screen_name,
+        # Screen attributes
         "url": screen.url,
+        "selector": screen.selector,
+        "declared_variables": screen.declared_variables,
         "status": screen.url_status.value,
         "variable": screen.variable_name,
         "version": screen.descriptor_version,
+        # References for hierarchy navigation
         "reference": screen.reference,
+        "parent_ref": screen.parent_ref,
+        "created": screen.created,
+        "updated": screen.updated,
+        "created_by": screen.created_by,
+        "updated_by": screen.updated_by,
     }
 
 
 def _element_to_flat_dict(element: ElementEntry) -> dict[str, Any]:
     """Convert ElementEntry to flat dict."""
+    # Parent path is the screen containing this element
+    parent_path = f"{element.app_name}/{element.app_version}/{element.screen_name}"
+
     return {
         "type": "element",
         "path": element.full_path,
+        # Explicit filter fields
+        "app_name": element.app_name,
+        "app_version": element.app_version,
+        "screen_name": element.screen_name,
+        "element_name": element.element_name,
+        "parent_path": parent_path,
+        # Element attributes
         "search_steps": element.search_steps,
         "element_type": element.element_type,
         "activity_type": element.activity_type,
+        "visibility": element.visibility,
+        "wait_for_ready": element.wait_for_ready,
         "scope_selector": element.scope_selector,
         "full_selector": element.full_selector,
+        "fuzzy_selector": element.fuzzy_selector,
+        "has_image": element.has_image,
+        "has_cv": element.has_cv,
+        "cv_type": element.cv_type,
         "scope_variables": element.scope_variables,
         "selector_variables": element.selector_variables,
         "version": element.descriptor_version,
+        # References for hierarchy navigation
         "reference": element.reference,
+        "parent_ref": element.parent_ref,
+        "created": element.created,
+        "updated": element.updated,
+        "created_by": element.created_by,
+        "updated_by": element.updated_by,
     }
 
 

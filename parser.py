@@ -9,6 +9,7 @@ Handles:
 
 import json
 import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,15 +67,44 @@ def read_content_file(path: Path) -> tuple[str, str]:
     return data.decode("utf-8", errors="replace"), "utf-8"
 
 
+def verify_xml_wellformed(path: Path) -> tuple[bool, str | None]:
+    """Verify that a .content file is well-formed XML.
+
+    Args:
+        path: Path to .content file
+
+    Returns:
+        Tuple of (is_valid, error_message)
+        - (True, None) if XML is well-formed
+        - (False, error_message) if XML is malformed
+    """
+    if not path.exists():
+        return False, f"File not found: {path}"
+
+    try:
+        text, _ = read_content_file(path)
+        ET.fromstring(text)
+        return True, None
+    except ET.ParseError as e:
+        return False, f"XML parse error: {e}"
+    except Exception as e:
+        return False, f"Error reading file: {e}"
+
+
 @dataclass
 class Metadata:
     """Parsed .metadata file."""
 
     name: str
-    type: str  # App, AppVersion, Screen
+    type: str  # App, AppVersion, Screen, Element
     id: str
     reference: str
     parent_ref: str | None = None
+    # Audit metadata
+    created: str | None = None  # ISO 8601 timestamp
+    updated: str | None = None  # ISO 8601 timestamp
+    created_by: list[str] | None = None  # UiPath platform version array
+    updated_by: list[str] | None = None  # UiPath platform version array
 
 
 @dataclass
@@ -110,6 +140,10 @@ def parse_metadata(path: Path) -> Metadata | None:
             id=data.get("Id", ""),
             reference=data.get("Reference", ""),
             parent_ref=data.get("ParentRef"),
+            created=data.get("Created"),
+            updated=data.get("Updated"),
+            created_by=data.get("CreatedBy"),
+            updated_by=data.get("UpdatedBy"),
         )
     except (json.JSONDecodeError, KeyError):
         return None

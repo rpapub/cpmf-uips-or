@@ -1,0 +1,13 @@
+# Revert CMS Screen URLs
+[[rules]]
+type = "reset"
+target = "screen"
+variable = "cmsBaseUrl"
+value = "https://soatl-cms-last.tcb.deutschepost.de:7002/fe/"
+
+# Revert Demo element scope selector
+[[rules]]
+type = "reset"
+target = "element.scope"
+variable = "windowTitle"
+value = "Example Domain - Google Chrome"

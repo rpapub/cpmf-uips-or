@@ -5,8 +5,8 @@
 # ==== SCREEN RULES (V2 URLs) ====
 
 # Base URL parameterization (wildcard preserves path suffix)
-# Example: https://foo.example.com/app/pages/login.xhtml
-#       -> [cmsBaseUrl]pages/login.xhtml
+# Example: https://foo.example.com/app/pages/login.html
+#       -> [cmsBaseUrl]pages/login.html
 [[rules]]
 type = "parameterize"
 match = "https://foo.example.com/app/*"   # Wildcard: replace base, keep path

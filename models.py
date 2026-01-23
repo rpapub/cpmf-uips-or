@@ -20,6 +20,33 @@ class EntryType(Enum):
     ELEMENT = "element"
 
 
+# ---------- Project and Library metadata ----------
+
+
+@dataclass
+class ProjectMeta:
+    """Metadata from project.json."""
+
+    name: str
+    project_id: str
+    version: str
+    studio_version: str
+    target_framework: str
+    ui_automation_version: str | None = None
+
+
+@dataclass
+class LibraryMeta:
+    """Metadata from .objects/.metadata (Library level)."""
+
+    id: str
+    created: str
+    created_by: list[str]
+
+
+# ---------- Entry classes ----------
+
+
 @dataclass
 class ScreenEntry:
     """Represents a Screen (V2) in the Object Repository."""
@@ -36,6 +63,13 @@ class ScreenEntry:
     content_path: Path
     parent_ref: str | None = None  # Reference to parent AppVersion
     screenshot: str | None = None  # InformativeScreenshot filename
+    declared_variables: list[str] | None = None  # ObjectRepositoryVariableData names
+
+    # Audit metadata from .metadata file
+    created: str | None = None
+    updated: str | None = None
+    created_by: list[str] | None = None
+    updated_by: list[str] | None = None
 
     entry_type: EntryType = field(default=EntryType.SCREEN, init=False)
 
@@ -69,9 +103,25 @@ class ElementEntry:
     parent_ref: str | None = None  # Reference to parent Screen or Element
     screenshot: str | None = None  # InformativeScreenshot filename
 
+    # Additional selector types
+    fuzzy_selector: str = ""  # FuzzySelectorArgument
+    has_image: bool = False  # ImageBase64 present and non-empty
+    has_cv: bool = False  # CV attributes present
+    cv_type: str = ""  # CvType (InputBox, Text, Button, etc.)
+
+    # Runtime behavior attributes
+    visibility: str = ""  # Visibility (Interactive, None, etc.)
+    wait_for_ready: str = ""  # WaitForReadyArgument (Interactive, Complete, None)
+
     # Parameterization status for scope and selector
     scope_variables: list[str] = field(default_factory=list)
     selector_variables: list[str] = field(default_factory=list)
+
+    # Audit metadata from .metadata file
+    created: str | None = None
+    updated: str | None = None
+    created_by: list[str] | None = None
+    updated_by: list[str] | None = None
 
     entry_type: EntryType = field(default=EntryType.ELEMENT, init=False)
 
@@ -111,6 +161,7 @@ class RuleTarget(Enum):
 
     ALL = "all"  # Default: applies to all types
     SCREEN = "screen"  # V2 Screen URLs only
+    SCREEN_SELECTOR = "screen.selector"  # V2 Screen Selector attributes
     ELEMENT_SCOPE = "element.scope"  # V6 ScopeSelectorArgument
     ELEMENT_SELECTOR = "element.selector"  # V6 FullSelectorArgument
 
@@ -130,6 +181,8 @@ class ParameterizeRule:
     variable: str  # Variable name to use
     target: RuleTarget = RuleTarget.ALL  # Default: all types
     attribute: str | None = None  # For element rules: which attribute
+    default_value: str = "*"  # DefaultValue for ObjectRepositoryVariableData
+    cascade: bool = False  # If true, cascade screen.selector to descendant element.scope
 
 
 @dataclass
@@ -155,10 +208,11 @@ class ReplacePreview:
     """Preview of a replacement operation."""
 
     entry: AnyEntry
-    old_value: str
-    new_value: str
+    old_value: str  # Full value for display (URL or full selector)
+    new_value: str  # Full new value for display
     rule: ReplaceRule
     attribute: str | None = None  # For element rules: which attribute was changed
+    attr_value: str | None = None  # Matched attribute value (e.g., "Google") for apply logic
 
 
 # ---------- Hierarchy classes for tree representation ----------
@@ -188,6 +242,9 @@ class VersionNode:
     reference: str
     parent_ref: str | None
     screens: list[ScreenNode] = field(default_factory=list)
+    # Audit metadata
+    created: str | None = None
+    created_by: list[str] | None = None
 
 
 @dataclass
@@ -197,6 +254,9 @@ class AppNode:
     name: str
     reference: str
     versions: list[VersionNode] = field(default_factory=list)
+    # Audit metadata
+    created: str | None = None
+    created_by: list[str] | None = None
 
 
 @dataclass
@@ -207,3 +267,6 @@ class Inventory:
     elements: list[ElementEntry]  # Flat list (backward compat)
     apps: list[AppNode]  # Hierarchy tree
     _by_reference: dict[str, AnyEntry] = field(default_factory=dict, repr=False)
+    # Project and library metadata
+    project: ProjectMeta | None = None
+    library: LibraryMeta | None = None
