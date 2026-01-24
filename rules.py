@@ -546,82 +546,82 @@ def preview_replacements(
                 )
                 continue
 
-        matched = False
+        # Track which target types have been matched (allows one rule per target type)
+        matched_targets: set[RuleTarget] = set()
         for rule in rules:
-            if matched:
-                break
-
             # Check screen URL rules (target = "screen" or "all")
-            if _match_screen_rule(entry, rule):
-                new_value = _compute_screen_new_value(entry, rule)
-                previews.append(
-                    ReplacePreview(
-                        entry=entry,
-                        old_value=entry.url,
-                        new_value=new_value,
-                        rule=rule,
-                        attribute=None,
+            if RuleTarget.SCREEN not in matched_targets:
+                if _match_screen_rule(entry, rule):
+                    new_value = _compute_screen_new_value(entry, rule)
+                    previews.append(
+                        ReplacePreview(
+                            entry=entry,
+                            old_value=entry.url,
+                            new_value=new_value,
+                            rule=rule,
+                            attribute=None,
+                        )
                     )
-                )
-                matched = True
-                continue
+                    matched_targets.add(RuleTarget.SCREEN)
+                    continue
 
             # Check screen.selector rules
-            matches, attr, old_value = _match_screen_selector_rule(entry, rule)
-            if matches and old_value:
-                new_value = _compute_element_new_value(old_value, rule)
-                previews.append(
-                    ReplacePreview(
-                        entry=entry,
-                        old_value=old_value,
-                        new_value=new_value,
-                        rule=rule,
-                        attribute=attr,
-                    )
-                )
-                matched = True
-
-                # Cascade to descendant elements if enabled
-                if (
-                    isinstance(rule, ParameterizeRule)
-                    and rule.cascade
-                    and attr  # Must have matched an attribute
-                ):
-                    descendants = find_descendant_elements(
-                        entry, elements, elements_by_ref
-                    )
-                    for elem in descendants:
-                        # Skip if already cascaded or not supported
-                        if elem.reference in cascaded_elements:
-                            continue
-                        if not element_adapter.is_version_supported(
-                            elem.descriptor_version
-                        ):
-                            if not force:
-                                continue
-
-                        # Check if element's scope has the same attribute value
-                        elem_attr_value = _extract_selector_attr_value(
-                            elem.scope_selector, attr
+            if RuleTarget.SCREEN_SELECTOR not in matched_targets:
+                matches, attr, old_value = _match_screen_selector_rule(entry, rule)
+                if matches and old_value:
+                    new_value = _compute_element_new_value(old_value, rule)
+                    previews.append(
+                        ReplacePreview(
+                            entry=entry,
+                            old_value=old_value,
+                            new_value=new_value,
+                            rule=rule,
+                            attribute=attr,
                         )
-                        if elem_attr_value == old_value:
-                            # Element scope matches - include in cascade
-                            old_selector, new_selector = (
-                                _compute_element_selector_preview(
-                                    elem.scope_selector, attr, elem_attr_value, rule
-                                )
+                    )
+                    matched_targets.add(RuleTarget.SCREEN_SELECTOR)
+
+                    # Cascade to descendant elements if enabled
+                    if (
+                        isinstance(rule, ParameterizeRule)
+                        and rule.cascade
+                        and attr  # Must have matched an attribute
+                    ):
+                        descendants = find_descendant_elements(
+                            entry, elements, elements_by_ref
+                        )
+                        for elem in descendants:
+                            # Skip if already cascaded or not supported
+                            if elem.reference in cascaded_elements:
+                                continue
+                            if not element_adapter.is_version_supported(
+                                elem.descriptor_version
+                            ):
+                                if not force:
+                                    continue
+
+                            # Check if element's scope has the same attribute value
+                            elem_attr_value = _extract_selector_attr_value(
+                                elem.scope_selector, attr
                             )
-                            previews.append(
-                                ReplacePreview(
-                                    entry=elem,
-                                    old_value=old_selector,
-                                    new_value=new_selector,
-                                    rule=rule,
-                                    attribute=attr or "scope",
-                                    attr_value=elem_attr_value,
+                            if elem_attr_value == old_value:
+                                # Element scope matches - include in cascade
+                                old_selector, new_selector = (
+                                    _compute_element_selector_preview(
+                                        elem.scope_selector, attr, elem_attr_value, rule
+                                    )
                                 )
-                            )
-                            cascaded_elements.add(elem.reference)
+                                previews.append(
+                                    ReplacePreview(
+                                        entry=elem,
+                                        old_value=old_selector,
+                                        new_value=new_selector,
+                                        rule=rule,
+                                        attribute=attr or "scope",
+                                        attr_value=elem_attr_value,
+                                    )
+                                )
+                                cascaded_elements.add(elem.reference)
 
     # Process Elements
     for entry in elements:
@@ -637,46 +637,46 @@ def preview_replacements(
                 )
                 continue
 
-        matched = False
+        # Track which target types have been matched (allows one rule per target type)
+        matched_targets: set[RuleTarget] = set()
         for rule in rules:
-            if matched:
-                break
-
             # Check scope selector
-            matches, attr, old_attr_value = _match_element_rule(entry, rule, "scope")
-            if matches and old_attr_value:
-                old_selector, new_selector = _compute_element_selector_preview(
-                    entry.scope_selector, attr, old_attr_value, rule
-                )
-                previews.append(
-                    ReplacePreview(
-                        entry=entry,
-                        old_value=old_selector,
-                        new_value=new_selector,
-                        rule=rule,
-                        attribute=attr or "scope",
-                        attr_value=old_attr_value,
+            if RuleTarget.ELEMENT_SCOPE not in matched_targets:
+                matches, attr, old_attr_value = _match_element_rule(entry, rule, "scope")
+                if matches and old_attr_value:
+                    old_selector, new_selector = _compute_element_selector_preview(
+                        entry.scope_selector, attr, old_attr_value, rule
                     )
-                )
-                matched = True
-                continue
+                    previews.append(
+                        ReplacePreview(
+                            entry=entry,
+                            old_value=old_selector,
+                            new_value=new_selector,
+                            rule=rule,
+                            attribute=attr or "scope",
+                            attr_value=old_attr_value,
+                        )
+                    )
+                    matched_targets.add(RuleTarget.ELEMENT_SCOPE)
+                    continue
 
             # Check full selector
-            matches, attr, old_attr_value = _match_element_rule(entry, rule, "selector")
-            if matches and old_attr_value:
-                old_selector, new_selector = _compute_element_selector_preview(
-                    entry.full_selector, attr, old_attr_value, rule
-                )
-                previews.append(
-                    ReplacePreview(
-                        entry=entry,
-                        old_value=old_selector,
-                        new_value=new_selector,
-                        rule=rule,
-                        attribute=attr or "selector",
-                        attr_value=old_attr_value,
+            if RuleTarget.ELEMENT_SELECTOR not in matched_targets:
+                matches, attr, old_attr_value = _match_element_rule(entry, rule, "selector")
+                if matches and old_attr_value:
+                    old_selector, new_selector = _compute_element_selector_preview(
+                        entry.full_selector, attr, old_attr_value, rule
                     )
-                )
-                matched = True
+                    previews.append(
+                        ReplacePreview(
+                            entry=entry,
+                            old_value=old_selector,
+                            new_value=new_selector,
+                            rule=rule,
+                            attribute=attr or "selector",
+                            attr_value=old_attr_value,
+                        )
+                    )
+                    matched_targets.add(RuleTarget.ELEMENT_SELECTOR)
 
     return previews, warnings
