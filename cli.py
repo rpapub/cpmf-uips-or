@@ -521,5 +521,84 @@ def _prompt_for_rules() -> list:
     return []
 
 
+class OrphanFormat(str, Enum):
+    """Output format for orphans command."""
+
+    text = "text"
+    json = "json"
+
+
+def _format_size(size_bytes: int) -> str:
+    """Format file size in human-readable form."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    else:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
+@app.command()
+def orphans(
+    project: Path = typer.Argument(..., help="Path to project.json"),
+    output_format: OrphanFormat = typer.Option(
+        OrphanFormat.text, "--format", "-f", help="Output format"
+    ),
+) -> None:
+    """List unreferenced screenshots in .screenshots/ folder."""
+    import json as json_module
+
+    objects_dir = find_objects_dir(project)
+    screenshots_dir = project.parent / ".screenshots"
+
+    if not screenshots_dir.exists():
+        typer.echo("No .screenshots/ directory found")
+        raise typer.Exit(0)
+
+    # Discover all objects
+    screens, elements = discover_all(objects_dir)
+
+    # Collect all referenced screenshot filenames
+    referenced: set[str] = set()
+    for s in screens:
+        if s.screenshot:
+            referenced.add(s.screenshot)
+    for e in elements:
+        if e.screenshot:
+            referenced.add(e.screenshot)
+
+    # Scan .screenshots/ directory
+    all_files: dict[str, int] = {}
+    for f in screenshots_dir.iterdir():
+        if f.is_file():
+            all_files[f.name] = f.stat().st_size
+
+    # Find orphaned files
+    orphaned_names = set(all_files.keys()) - referenced
+
+    if not orphaned_names:
+        if output_format == OrphanFormat.json:
+            typer.echo(json_module.dumps({"orphaned": [], "total_files": 0, "total_bytes": 0}))
+        else:
+            typer.echo("No orphaned screenshots found")
+        raise typer.Exit(0)
+
+    # Build orphaned list with sizes
+    orphaned = [{"file": name, "size": all_files[name]} for name in sorted(orphaned_names)]
+    total_bytes = sum(item["size"] for item in orphaned)
+
+    if output_format == OrphanFormat.json:
+        result = {
+            "orphaned": orphaned,
+            "total_files": len(orphaned),
+            "total_bytes": total_bytes,
+        }
+        typer.echo(json_module.dumps(result, indent=2))
+    else:
+        typer.echo(f"Orphaned screenshots ({len(orphaned)} files, {_format_size(total_bytes)}):")
+        for item in orphaned:
+            typer.echo(f"  {item['file']}  ({_format_size(item['size'])})")
+
+
 if __name__ == "__main__":
     app()
