@@ -1,0 +1,70 @@
+# cpmf-uisor configuration example
+# Supports V2 Screen URLs and V6 Element selectors
+# Variable syntax: [varName] for both types
+
+# ==== SCREEN RULES (V2 URLs) ====
+
+# Base URL parameterization (wildcard preserves path suffix)
+# Example: https://foo.example.com/app/pages/login.html
+#       -> [cmsBaseUrl]pages/login.html
+[[rules]]
+type = "parameterize"
+match = "https://foo.example.com/app/*"   # Wildcard: replace base, keep path
+variable = "cmsBaseUrl"                    # Naming: {system}BaseUrl
+
+# Exact URL parameterization (full URL replacement)
+# Example: https://api.example.com/v1/endpoint -> [apiEndpoint]
+[[rules]]
+type = "parameterize"
+match = "https://api.example.com/v1/endpoint"  # Exact match: replace entire URL
+variable = "apiEndpoint"
+
+# ==== ELEMENT RULES (V6 Selectors) ====
+
+# Scope selector: Browser/window title (ScopeSelectorArgument)
+# Example: <html app='chrome.exe' title='Login Page - FOO' />
+#       -> <html app='chrome.exe' title='[windowTitle]' />
+[[rules]]
+type = "parameterize"
+target = "element.scope"                  # Only V6 ScopeSelectorArgument
+attribute = "title"                       # Which attribute to match
+match = "Login Page*"                     # Wildcard pattern
+variable = "windowTitle"
+
+# Full selector: Element ID (FullSelectorArgument)
+# Example: <webctrl id='frmLogin_txtUser' />
+#       -> <webctrl id='[formId]' />
+[[rules]]
+type = "parameterize"
+target = "element.selector"               # Only V6 FullSelectorArgument
+attribute = "id"
+match = "frmLogin*"
+variable = "formId"
+
+# ==== RULES THAT APPLY TO ALL TYPES ====
+
+# By default, rules apply to all types (Screen URLs + Element selectors)
+# This matches both URL values and selector attribute values
+[[rules]]
+type = "parameterize"
+# target = "all"                          # Default: applies to all types
+match = "https://shared.example.com/*"
+variable = "sharedBaseUrl"
+
+# Rename: Change variable name across all types (refactoring)
+[[rules]]
+type = "rename"
+from_variable = "oldApiUrl"
+to_variable = "apiBaseUrl"
+
+# Reset: Revert variable back to hardcoded value (for testing)
+[[rules]]
+type = "reset"
+variable = "testBaseUrl"
+value = "https://test.example.com/"       # Use 'value' (or 'url' for backwards compat)
+
+# ==== TARGET OPTIONS ====
+# target = "all"              (default) Applies to all types
+# target = "screen"           V2 Screen URLs only
+# target = "element.scope"    V6 ScopeSelectorArgument only
+# target = "element.selector" V6 FullSelectorArgument only

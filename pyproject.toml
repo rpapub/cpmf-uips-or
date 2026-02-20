@@ -1,0 +1,52 @@
+[project]
+name = "cpmf-uisor"
+dynamic = ["version"]
+description = "UiPath Object Repository CLI Tool"
+readme = "!README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.9.0",
+    "jinja2>=3.0.0",
+    "pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.1.0",
+    "black>=24.0.0",
+]
+
+[project.scripts]
+cpmf-uisor = "cpmf_uisor.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "__init__.py"
+
+[tool.hatch.build.targets.wheel.force-include]
+"__init__.py" = "cpmf_uisor/__init__.py"
+"cli.py" = "cpmf_uisor/cli.py"
+"discovery.py" = "cpmf_uisor/discovery.py"
+"models.py" = "cpmf_uisor/models.py"
+"parser.py" = "cpmf_uisor/parser.py"
+"formatters.py" = "cpmf_uisor/formatters.py"
+"templates.py" = "cpmf_uisor/templates.py"
+"rules.py" = "cpmf_uisor/rules.py"
+"git.py" = "cpmf_uisor/git.py"
+"adapter_screen_V2.py" = "cpmf_uisor/adapter_screen_V2.py"
+"adapter_element_V6.py" = "cpmf_uisor/adapter_element_V6.py"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]

@@ -1,0 +1,16 @@
+# Parameterize CMS Screen URLs with base URL variable
+[[rules]]
+type = "parameterize"
+target = "screen"
+match = "https://soatl-cms-last.tcb.deutschepost.de:7002/fe/*"
+variable = "cmsBaseUrl"
+default_value = "https://soatl-cms-last.tcb.deutschepost.de:7002/fe/"
+
+# Parameterize Demo element scope selector title
+[[rules]]
+type = "parameterize"
+target = "element.scope"
+attribute = "title"
+match = "Example Domain - Google Chrome"
+variable = "windowTitle"
+default_value = "Example Domain - Google Chrome"
