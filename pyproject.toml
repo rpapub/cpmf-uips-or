@@ -1,8 +1,8 @@
 [project]
-name = "cpmf-uisor"
+name = "cpmf-uips-or"
 dynamic = ["version"]
 description = "UiPath Object Repository CLI Tool"
-readme = "!README.md"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "typer>=0.9.0",
@@ -10,43 +10,93 @@ dependencies = [
     "pillow>=10.0.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "ruff>=0.1.0",
-    "black>=24.0.0",
-]
-
 [project.scripts]
-cpmf-uisor = "cpmf_uisor.cli:app"
+cpmf-uips-or = "cpmf_uips_or.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
-path = "__init__.py"
+path = "cpmf_uips_or/__version__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cpmf_uips_or"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"__init__.py" = "cpmf_uisor/__init__.py"
-"cli.py" = "cpmf_uisor/cli.py"
-"discovery.py" = "cpmf_uisor/discovery.py"
-"models.py" = "cpmf_uisor/models.py"
-"parser.py" = "cpmf_uisor/parser.py"
-"formatters.py" = "cpmf_uisor/formatters.py"
-"templates.py" = "cpmf_uisor/templates.py"
-"rules.py" = "cpmf_uisor/rules.py"
-"git.py" = "cpmf_uisor/git.py"
-"adapter_screen_V2.py" = "cpmf_uisor/adapter_screen_V2.py"
-"adapter_element_V6.py" = "cpmf_uisor/adapter_element_V6.py"
+"cpmf_uips_or/py.typed" = "cpmf_uips_or/py.typed"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.1.0",
+    "black>=24.0.0",
+    "mypy>=1.5.0",
+    "pytest>=8.0.0",
+    "pytest-cov>=6.0.0",
+    "twine>=6.0.0",
+]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
-ignore = ["E501"]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"cpmf_uips_or/cli.py" = ["B008", "E501"]     # Typer requires function calls in defaults
+"cpmf_uips_or/templates.py" = ["E501"]        # Jinja template strings can't be wrapped
+"cpmf_uips_or/adapter_screen_V2.py" = ["E501"]  # XML template constants
+"cpmf_uips_or/adapter_element_V6.py" = ["E501"] # XML template constants
+"tests/unit/conftest.py" = ["E501"]             # XML attribute strings can't be wrapped
 
 [tool.black]
 line-length = 100
 target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+warn_return_any = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--cov=cpmf_uips_or",
+    "--cov-report=term-missing",
+    "--cov-fail-under=70",
+]
+markers = [
+    "unit: fast isolated tests",
+    "integration: tests using real .objects fixtures",
+    "slow: long-running tests",
+]
+
+[tool.coverage.run]
+source = ["cpmf_uips_or"]
+omit = [
+    "tests/*",
+    "cpmf_uips_or/cli.py",
+    "cpmf_uips_or/git.py",
+    "cpmf_uips_or/templates.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
